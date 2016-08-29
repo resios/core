@@ -106,14 +106,27 @@ module.exports = function(config, optimist) {
         console.log("Run using --listen localhost instead to only expose Cloud9 to localhost,");
         console.log("or use -a username:password to setup HTTP authentication\n");
     }
+    
+    var fs = require('fs');
 
     var plugins = [
         {
             packagePath: "connect-architect/connect",
             port: port,
             host: host,
+	        secure: {
+		        key: fs.readFileSync("/home/resios/c9sdk/key.pem"),
+                cert: fs.readFileSync("/home/resios/c9sdk/cert.pem"),
+                ca: fs.readFileSync("/home/resios/c9sdk/ca.crt"),
+                //TODO: add crls
+                requestCert: true,
+                rejectUnauthorized: false
+	        },
             websocket: true,
             showRealIP: !config.mode
+        },
+        {
+            packagePath: "connect-architect/connect.clientcertauth"
         },
         {
             packagePath: "connect-architect/connect.basicauth",
