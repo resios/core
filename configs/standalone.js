@@ -1,7 +1,7 @@
 module.exports = function(config, optimist) {
-    
+
     var path = require("path");
-    
+
     if (!optimist.local) {
         optimist
             .boolean("t")
@@ -41,18 +41,23 @@ module.exports = function(config, optimist) {
             .boolean("inProcessLocalFs")
             .describe("inProcessLocalFs", "Whether to run localfs in same process for debugging.")
             .default("inProcessLocalFs", config.inProcessLocalFs)
-            .boolean("useBrowserCache");
+            .boolean("useBrowserCache")
+            .boolean("secure")
+            .describe("secure", "Whether to run with HTTPS and client certificate authentication.")
+            .describe("sslKey", "The key for the SSL server certificate in PEM format.")
+            .describe("sslCert", "The SSL server certificate in PEM format.")
+            .describe("sslCA", "The CA file used to issue client certificates in PEM format. This enables client side verification.");
     }
-    
+
     var argv = optimist.argv;
     if (argv.help)
         return null;
-    
+
     var testing = argv.t;
-    var baseProc = path.normalize(testing
-        ? __dirname + "/../plugins/c9.fs/mock"
-        : argv.w || (__dirname + "/../"));
-    
+    var baseProc = path.normalize(testing ?
+        __dirname + "/../plugins/c9.fs/mock" :
+        argv.w || (__dirname + "/../"));
+
     // if (testing && !argv["setting-path"])
     //     argv["setting-path"] = "/tmp/.c9";
 
@@ -66,29 +71,29 @@ module.exports = function(config, optimist) {
     var debug = argv.d;
     var readonly = argv.readonly;
     var startBridge = argv.b;
-    
+
     config.port = port || argv.port;
     config.host = host || argv.listen;
-    
+
     if (argv.collab != null)
         config.collab = argv.collab;
-    
+
     var workspaceType = argv.workspacetype || null;
-    
+
     if (argv.hosted)
         config.client_config = "default-hosted";
-    
+
     config.workspaceDir = baseProc;
     config.settingDir = argv["setting-path"];
     config.projectName = path.basename(baseProc);
     config.testing = testing;
     config.debug = debug;
-    
+
     if (!config.startBridge)
         config.startBridge = startBridge;
-    
+
     if (testing && argv.k)
-        require("child_process").exec("tmux -L cloud91.9 kill-server", function(){});
+        require("child_process").exec("tmux -L cloud91.9 kill-server", function() {});
 
     var isLocalhost = host == "localhost" || host == "127.0.0.1";
     if (!/:/.test(argv.auth) && !isLocalhost) {
@@ -106,38 +111,46 @@ module.exports = function(config, optimist) {
         console.log("Run using --listen localhost instead to only expose Cloud9 to localhost,");
         console.log("or use -a username:password to setup HTTP authentication\n");
     }
-    
-    var fs = require('fs');
 
-    var plugins = [
-        {
+    var secure = null;
+    var hasClientAuth = false;
+    if (argv.secure === true) {
+        var fs = require('fs');
+        secure = {
+            key: fs.readFileSync(argv.sslKey),
+            cert: fs.readFileSync(argv.sslCert),
+        };
+
+        if (fs.statSync(argv.sslCA).isFile()) {
+            secure.ca = fs.readFileSync(argv.sslCA);
+            secure.requestCert = true;
+            secure.rejectUnauthorized = false;
+            hasClientAuth = true;
+            //TODO: add CRL support
+        }
+    }
+    console.log(hasClientAuth);
+
+
+    var plugins = [{
             packagePath: "connect-architect/connect",
             port: port,
             host: host,
-	        secure: {
-		        key: fs.readFileSync("/home/resios/c9sdk/key.pem"),
-                cert: fs.readFileSync("/home/resios/c9sdk/cert.pem"),
-                ca: fs.readFileSync("/home/resios/c9sdk/ca.crt"),
-                //TODO: add crls
-                requestCert: true,
-                rejectUnauthorized: false
-	        },
+            secure: secure,
             websocket: true,
             showRealIP: !config.mode
-        },
-        {
-            packagePath: "connect-architect/connect.clientcertauth"
-        },
-        {
+        }, {
+            packagePath: "connect-architect/connect.clientcertauth",
+            secure: hasClientAuth,
+            secureUser: process.env.USER
+        }, {
             packagePath: "connect-architect/connect.basicauth",
             username: auth[0],
             password: auth[1]
-        },
-        {
+        }, {
             packagePath: "connect-architect/connect.static",
             prefix: "/static"
-        },
-        {
+        }, {
             packagePath: "./c9.error/error_handler",
             mode: config.mode,
             scope: "standalone",
@@ -145,17 +158,16 @@ module.exports = function(config, optimist) {
         },
         "connect-architect/connect.remote-address",
         "connect-architect/connect.render",
-        "connect-architect/connect.render.ejs",
-        {
+        "connect-architect/connect.render.ejs", {
             packagePath: "connect-architect/connect.redirect",
             trustedDomainsRe: /.*/,
-        }, 
+        },
         "connect-architect/connect.cors",
         "./c9.connect.favicon/favicon",
         // "./c9.logger/stdout-logger",
-        
+
         "./c9.core/ext",
-        
+
         {
             packagePath: "./c9.ide.server/plugins",
             // allow everything in standalone mode
@@ -177,8 +189,7 @@ module.exports = function(config, optimist) {
             }
         },
         "./c9.preview/statics",
-        "./c9.nodeapi/nodeapi",
-        {
+        "./c9.nodeapi/nodeapi", {
             packagePath: "./c9.vfs.standalone/standalone",
             sdk: config.sdk,
             local: config.local,
@@ -205,8 +216,7 @@ module.exports = function(config, optimist) {
         "./c9.vfs.server/fetchcache",
         "./c9.vfs.server/statics",
         "./c9.analytics/mock_analytics",
-        "./c9.metrics/mock_metrics",
-        {
+        "./c9.metrics/mock_metrics", {
             packagePath: "./c9.vfs.server/vfs.connect.standalone",
             workspaceDir: baseProc,
             readonly: readonly,
@@ -219,12 +229,14 @@ module.exports = function(config, optimist) {
             nodeBin: config.nodeBin,
             tmuxBin: config.tmux,
             vfs: {
-                defaultEnv: { CUSTOM: 43 },
+                defaultEnv: {
+                    CUSTOM: 43
+                },
                 local: config.local,
                 debug: debug,
                 inProcess: argv.inProcessLocalFs
             }
-        /* ### BEGIN #*/
+            /* ### BEGIN #*/
         }, {
             packagePath: "./c9.static/cdn",
             useBrowserCache: argv.useBrowserCache,
@@ -237,19 +249,20 @@ module.exports = function(config, optimist) {
             baseUrl: config.cdn.baseUrl,
             virtual: config.cdn.virtual,
             config: "standalone"
-        /* ### END #*/
+                /* ### END #*/
         }
     ];
-    
+
     if (config.collab && !config.mode && !config.local) {
         try {
             var addApi = require("./api.standalone").addApi;
-        } catch(e) {}
+        }
+        catch (e) {}
         if (addApi) {
             plugins = addApi(plugins, config);
         }
     }
-    
+
     return plugins;
 };
 
